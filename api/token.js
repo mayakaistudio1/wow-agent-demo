@@ -1,65 +1,66 @@
-// api/token.js
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
-      res.statusCode = 405;
-      return res.end("Method Not Allowed");
-    }
-
-    // --- read + parse JSON body (Vercel Functions НЕ гарантируют req.body как объект)
-    let raw = "";
-    for await (const chunk of req) raw += chunk;
-    let body = {};
-    if (raw) {
-      try { body = JSON.parse(raw); } catch { body = {}; }
+      return res.status(405).json({ error: "Method Not Allowed" });
     }
 
     const apiKey = process.env.LIVEAVATAR_API_KEY;
     if (!apiKey) {
-      res.statusCode = 500;
-      return res.end("Missing env LIVEAVATAR_API_KEY in Vercel");
+      return res.status(500).json({ error: "ENV LIVEAVATAR_API_KEY is missing" });
     }
 
-    const r = await fetch("https://api.liveavatar.com/v1/sessions/token", {
+    const body = req.body || {};
+    const role = body.role || "unknown";
+    const name = body.name || "friend";
+
+    // Если LiveAvatar требует avatar/agent id — добавь ENV и раскомментируй.
+    // const avatarId = process.env.LIVEAVATAR_AVATAR_ID;
+
+    const payload = {
+      mode: "FULL",
+      // ...(avatarId ? { avatar_id: avatarId } : {}),
+      metadata: { role, name, source: "wow-agent-demo" },
+    };
+
+    const url = "https://api.liveavatar.com/v1/sessions";
+
+    const upstream = await fetch(url, {
       method: "POST",
       headers: {
-        "X-API-KEY": apiKey,
-        "Content-Type": "application/json"
-      }
-      // body тут не обязателен, но если хочешь — можно передать role/name:
-      // body: JSON.stringify({ role: body.role, name: body.name })
+        "content-type": "application/json",
+        "authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
     });
 
-    const text = await r.text();
+    const raw = await upstream.text();
+    let data;
+    try { data = JSON.parse(raw); } catch { data = { raw }; }
 
-    // Если LiveAvatar вернул ошибку — отдадим её наружу как есть (чтобы ты видел реальную причину)
-    if (!r.ok) {
-      res.statusCode = r.status;
-      res.setHeader("content-type", "application/json; charset=utf-8");
-      return res.end(JSON.stringify({ error: true, status: r.status, liveavatar: text }));
+    if (!upstream.ok) {
+      console.error("LiveAvatar API error:", upstream.status, data);
+      return res.status(upstream.status).json({
+        error: "LiveAvatar API error",
+        status: upstream.status,
+        data,
+      });
     }
-
-    // LiveAvatar обычно отдаёт JSON
-    let json;
-    try { json = JSON.parse(text); } catch { json = { raw: text }; }
 
     const token =
-      json?.data?.session_token ||
-      json?.session_token ||
-      json?.token;
+      data.token ||
+      data.session_token ||
+      data?.data?.token ||
+      null;
 
-    if (!token) {
-      res.statusCode = 500;
-      res.setHeader("content-type", "application/json; charset=utf-8");
-      return res.end(JSON.stringify({ error: true, message: "Token not found in response", response: json }));
-    }
+    const session_id =
+      data.session_id ||
+      data.id ||
+      data?.data?.session_id ||
+      null;
 
-    res.statusCode = 200;
-    res.setHeader("content-type", "application/json; charset=utf-8");
-    return res.end(JSON.stringify({ token }));
+    return res.status(200).json({ token, session_id, data });
   } catch (e) {
-    res.statusCode = 500;
-    res.setHeader("content-type", "application/json; charset=utf-8");
-    return res.end(JSON.stringify({ error: true, message: e?.message || String(e) }));
+    console.error("token.js crash:", e);
+    return res.status(500).json({ error: "token.js crash", message: String(e?.message || e) });
   }
-};
+}
