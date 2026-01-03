@@ -1,66 +1,63 @@
-export default async function handler(req, res) {
+// /api/token.js  (CommonJS для Vercel)
+module.exports = async (req, res) => {
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method Not Allowed" });
     }
 
-    const apiKey = process.env.LIVEAVATAR_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: "ENV LIVEAVATAR_API_KEY is missing" });
-    }
+    const API_KEY = process.env.LIVEAVATAR_API_KEY;
+    const AVATAR_ID = process.env.LIVEAVATAR_AVATAR_ID;
+    const CONTEXT_ID = process.env.LIVEAVATAR_CONTEXT_ID;
+    const VOICE_ID = process.env.LIVEAVATAR_VOICE_ID;
 
-    const body = req.body || {};
-    const role = body.role || "unknown";
+    if (!API_KEY) return res.status(500).json({ error: "Missing LIVEAVATAR_API_KEY" });
+    if (!AVATAR_ID) return res.status(500).json({ error: "Missing LIVEAVATAR_AVATAR_ID" });
+    if (!CONTEXT_ID) return res.status(500).json({ error: "Missing LIVEAVATAR_CONTEXT_ID" });
+    if (!VOICE_ID) return res.status(500).json({ error: "Missing LIVEAVATAR_VOICE_ID" });
+
+    // Vercel обычно уже парсит JSON body, но подстрахуемся
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const name = body.name || "friend";
 
-    // Если LiveAvatar требует avatar/agent id — добавь ENV и раскомментируй.
-    // const avatarId = process.env.LIVEAVATAR_AVATAR_ID;
-
+    // FULL mode => avatar_persona обязателен (по доке)
     const payload = {
       mode: "FULL",
-      // ...(avatarId ? { avatar_id: avatarId } : {}),
-      metadata: { role, name, source: "wow-agent-demo" },
+      avatar_persona: {
+        avatar_id: AVATAR_ID,
+        context_id: CONTEXT_ID,
+        voice_id: VOICE_ID,
+      },
+      // опционально: можно хранить имя пользователя в metadata (если API это игнорит — не страшно)
+      metadata: { name },
     };
 
-    const url = "https://api.liveavatar.com/v1/sessions";
-
-    const upstream = await fetch(url, {
-      method: "POST",
+    const r = await fetch("https://api.liveavatar.com/v1/sessions/token", {
+      method: "POST", // <<< ЭТО КЛЮЧЕВО, иначе будет GET => 405
       headers: {
         "content-type": "application/json",
-        "authorization": `Bearer ${apiKey}`,
+        "authorization": `Bearer ${API_KEY}`,
       },
       body: JSON.stringify(payload),
     });
 
-    const raw = await upstream.text();
-    let data;
-    try { data = JSON.parse(raw); } catch { data = { raw }; }
-
-    if (!upstream.ok) {
-      console.error("LiveAvatar API error:", upstream.status, data);
-      return res.status(upstream.status).json({
+    const text = await r.text();
+    if (!r.ok) {
+      return res.status(r.status).json({
         error: "LiveAvatar API error",
-        status: upstream.status,
-        data,
+        status: r.status,
+        data: safeJson(text),
       });
     }
 
-    const token =
-      data.token ||
-      data.session_token ||
-      data?.data?.token ||
-      null;
-
-    const session_id =
-      data.session_id ||
-      data.id ||
-      data?.data?.session_id ||
-      null;
-
-    return res.status(200).json({ token, session_id, data });
+    return res.status(200).json(safeJson(text));
   } catch (e) {
-    console.error("token.js crash:", e);
-    return res.status(500).json({ error: "token.js crash", message: String(e?.message || e) });
+    return res.status(500).json({
+      error: "Server error",
+      message: e?.message || String(e),
+    });
   }
+};
+
+function safeJson(text) {
+  try { return JSON.parse(text); } catch { return { raw: text }; }
 }
