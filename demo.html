@@ -42,6 +42,22 @@
     </div>
 
     <p id="status" style="margin-top:12px">Статус: ждём выбора роли.</p>
+    <!-- LiveKit / Avatar view + Debug -->
+    <div style="margin-top:14px; display:grid; grid-template-columns: 1fr 360px; gap:12px; align-items:start;">
+      <div id="videoContainer" style="aspect-ratio:16/9; background:#111; border-radius:12px; overflow:hidden; position:relative;">
+        <div id="videoHint" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#bbb; font:14px system-ui;">
+          Видео/аудио появятся после подключения LiveKit
+        </div>
+      </div>
+
+      <div>
+        <div style="font:12px system-ui; opacity:.75; margin:2px 0 6px;">/api/start JSON (debug)</div>
+        <pre id="startDebug" style="height:220px; overflow:auto; background:#f7f7f7; border:1px solid #eee; border-radius:12px; padding:10px; white-space:pre-wrap;"></pre>
+
+        <div style="font:12px system-ui; opacity:.75; margin:10px 0 6px;">LiveKit debug</div>
+        <pre id="lkDebug" style="height:140px; overflow:auto; background:#f7f7f7; border:1px solid #eee; border-radius:12px; padding:10px; white-space:pre-wrap;"></pre>
+      </div>
+    </div>
 
     <!-- ВАЖНО:
          Тут позже вставим реальный рендер LiveAvatar через SDK.
@@ -52,6 +68,7 @@
     <b>CTA после демо:</b>
     <p>Хочешь демо под твою нишу за 48 часов? → <a href="#">забронировать 15 минут</a></p>
   </div>
+<script src="https://unpkg.com/livekit-client/dist/livekit-client.umd.min.js"></script>
 
 <script>
   let chosenRole = "sales"; // пока фикс
@@ -61,6 +78,16 @@
   let sessionId = null;
   let sessionToken = null;
 
+  // LiveKit state
+  let room = null;
+  let attachedVideoEl = null;
+  let attachedAudioEl = null;
+
+  const startDebugEl = document.getElementById("startDebug");
+  const lkDebugEl = document.getElementById("lkDebug");
+  const videoContainer = document.getElementById("videoContainer");
+  const videoHint = document.getElementById("videoHint");
+
   async function postJSON(url, body) {
     const r = await fetch(url, {
       method: "POST",
@@ -68,8 +95,36 @@
       body: JSON.stringify(body || {})
     });
     const text = await r.text();
-    if (!r.ok) throw new Error(text);
-    try { return JSON.parse(text); } catch { return { raw: text }; }
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+    if (!r.ok) throw new Error(json?.error || json?.message || text);
+    return json;
+  }
+
+  function showStartJSON(obj) {
+    if (!startDebugEl) return;
+    startDebugEl.textContent = obj ? JSON.stringify(obj, null, 2) : "";
+  }
+
+  function showLK(msgOrObj) {
+    if (!lkDebugEl) return;
+    lkDebugEl.textContent = (typeof msgOrObj === "string")
+      ? msgOrObj
+      : JSON.stringify(msgOrObj, null, 2);
+  }
+
+  function cleanupMedia() {
+    if (attachedVideoEl) {
+      attachedVideoEl.srcObject = null;
+      attachedVideoEl.remove();
+      attachedVideoEl = null;
+    }
+    if (attachedAudioEl) {
+      attachedAudioEl.srcObject = null;
+      attachedAudioEl.remove();
+      attachedAudioEl = null;
+    }
+    if (videoHint) videoHint.style.display = "flex";
   }
 
   function startTimer() {
@@ -86,22 +141,126 @@
     }, 1000);
   }
 
+  async function connectLiveKit(payload) {
+    if (!window.LivekitClient) {
+      throw new Error("LivekitClient не найден. Проверь подключение CDN livekit-client.");
+    }
+
+    const lkUrl = payload?.livekit_url;
+    const lkToken = payload?.livekit_client_token; // ВАЖНО: client token
+
+    if (!lkUrl || !lkToken) {
+      throw new Error("В payload нет livekit_url или livekit_client_token.");
+    }
+
+    // если уже подключены
+    if (room) {
+      try { room.disconnect(); } catch {}
+      room = null;
+    }
+    cleanupMedia();
+
+    const { Room, RoomEvent } = window.LivekitClient;
+
+    room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+      autoSubscribe: true,
+    });
+
+    showLK({ step: "connecting", lkUrl });
+
+    room.on(RoomEvent.ParticipantConnected, (p) => {
+      showLK({ step: "participant_connected", identity: p.identity });
+    });
+
+    room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+      try {
+        if (track.kind === "video") {
+          if (videoHint) videoHint.style.display = "none";
+
+          if (attachedVideoEl) {
+            attachedVideoEl.srcObject = null;
+            attachedVideoEl.remove();
+            attachedVideoEl = null;
+          }
+
+          const el = track.attach();
+          el.autoplay = true;
+          el.playsInline = true;
+          el.style.width = "100%";
+          el.style.height = "100%";
+          el.style.objectFit = "cover";
+          el.style.display = "block";
+          videoContainer.appendChild(el);
+          attachedVideoEl = el;
+
+          showLK({ step: "video_attached", from: participant?.identity || "remote" });
+        }
+
+        if (track.kind === "audio") {
+          if (attachedAudioEl) {
+            attachedAudioEl.srcObject = null;
+            attachedAudioEl.remove();
+            attachedAudioEl = null;
+          }
+
+          const ael = track.attach();
+          ael.autoplay = true;
+          ael.muted = false;
+          ael.style.display = "none";
+          document.body.appendChild(ael);
+          attachedAudioEl = ael;
+
+          ael.play?.().catch(() => {
+            showLK("audio autoplay blocked — если нет звука, добавим кнопку Unmute.");
+          });
+
+          showLK({ step: "audio_attached", from: participant?.identity || "remote" });
+        }
+      } catch (e) {
+        showLK("trackSubscribed error: " + (e?.message || String(e)));
+      }
+    });
+
+    room.on(RoomEvent.Disconnected, (reason) => {
+      showLK({ step: "disconnected", reason: String(reason || "") });
+      cleanupMedia();
+      room = null;
+    });
+
+    await room.connect(lkUrl, lkToken);
+
+    showLK({ step: "connected", room: room.name, sid: room.sid, remotes: room.remoteParticipants.size });
+  }
+
   async function stopSession() {
     document.getElementById("status").textContent = "Статус: завершаю сессию…";
     try {
       await postJSON("/api/stop", { session_id: sessionId, session_token: sessionToken });
+
+      if (room) {
+        try { room.disconnect(); } catch {}
+        room = null;
+      }
+      cleanupMedia();
+
       document.getElementById("status").textContent = "Статус: сессия завершена. Показываю CTA.";
+      showLK({ step: "stopped_ok" });
     } catch (e) {
       document.getElementById("status").textContent = "Статус: ошибка STOP: " + (e?.message || String(e));
+      showLK("stop error: " + (e?.message || String(e)));
     }
     document.getElementById("stop").disabled = true;
   }
 
   document.getElementById("start").addEventListener("click", async () => {
     document.getElementById("status").textContent = "Статус: получаю session_token…";
+    showLK("");
+    showStartJSON(null);
+
     try {
       const tok = await postJSON("/api/token", { language: "ru" });
-
       sessionId = tok.session_id;
       sessionToken = tok.session_token;
 
@@ -109,19 +268,27 @@
 
       const started = await postJSON("/api/start", { session_token: sessionToken });
 
-      // started.data: livekit_url, livekit_client_token, ws_url, max_session_duration...
+      // твой формат: started.data = payload
+      const payload = started?.data ?? started;
+      showStartJSON(payload);
+
       document.getElementById("status").textContent =
-        "Сессия запущена ✅ session_id=" + (started?.data?.session_id || sessionId);
+        "Сессия запущена ✅ session_id=" + (payload?.session_id || sessionId);
+
+      // CONNECT LIVEKIT
+      await connectLiveKit(payload);
 
       document.getElementById("stop").disabled = false;
       startTimer();
     } catch (e) {
       document.getElementById("status").textContent = "Ошибка: " + (e?.message || String(e));
+      showLK("start error: " + (e?.message || String(e)));
       console.error(e);
     }
   });
 
   document.getElementById("stop").addEventListener("click", stopSession);
 </script>
+
 </body>
 </html>
