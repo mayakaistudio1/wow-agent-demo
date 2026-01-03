@@ -54,48 +54,31 @@
   </div>
 
 <script>
-  let chosenRole = null;
+  let chosenRole = "sales"; // пока фикс
   let countdown = null;
   let secondsLeft = 0;
-  let sessionId = null; // сюда положим id сессии, когда подключим SDK/Start
 
-  document.querySelectorAll('#roles button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      chosenRole = btn.dataset.role;
-      document.getElementById('role').textContent = chosenRole;
-      document.getElementById('status').textContent = 'Статус: роль выбрана, можно стартовать.';
-    });
-  });
+  let sessionId = null;
+  let sessionToken = null;
 
   async function postJSON(url, body) {
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body || {})
-  });
-
-  const text = await r.text();
-
-  // если сервер вернул ошибку — покажем её как есть
-  if (!r.ok) throw new Error(text);
-
-  // если сервер вернул не-JSON — не ломаемся, а возвращаем raw
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { raw: text };
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body || {})
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(text);
+    try { return JSON.parse(text); } catch { return { raw: text }; }
   }
-}
-
-
 
   function startTimer() {
     clearInterval(countdown);
     secondsLeft = 60;
-    document.getElementById('timer').textContent = secondsLeft + 's';
+    document.getElementById("timer").textContent = secondsLeft + "s";
     countdown = setInterval(async () => {
       secondsLeft -= 1;
-      document.getElementById('timer').textContent = secondsLeft + 's';
+      document.getElementById("timer").textContent = secondsLeft + "s";
       if (secondsLeft <= 0) {
         clearInterval(countdown);
         await stopSession();
@@ -104,47 +87,41 @@
   }
 
   async function stopSession() {
-    document.getElementById('status').textContent = 'Статус: завершаю сессию…';
+    document.getElementById("status").textContent = "Статус: завершаю сессию…";
     try {
-      // ВАЖНО: stop реально заработает, когда у нас будет session_id.
-      // Пока оставляем как готовую точку вызова.
-      await postJSON('/api/stop', { session_id: sessionId });
-      document.getElementById('status').textContent = 'Статус: сессия завершена. Показываю CTA.';
+      await postJSON("/api/stop", { session_id: sessionId, session_token: sessionToken });
+      document.getElementById("status").textContent = "Статус: сессия завершена. Показываю CTA.";
     } catch (e) {
-      document.getElementById('status').textContent = 'Статус: STOP не сработал (пока нет session_id).';
-      console.warn(e);
+      document.getElementById("status").textContent = "Статус: ошибка STOP: " + (e?.message || String(e));
     }
-    document.getElementById('stop').disabled = true;
+    document.getElementById("stop").disabled = true;
   }
 
-  document.getElementById('start').addEventListener('click', async () => {
-    if (!chosenRole) {
-      alert('Выбери роль (карточку) сначала.');
-      return;
-    }
-    const name = document.getElementById('name').value || 'друг';
-
-    document.getElementById('status').textContent = 'Статус: получаю токен…';
+  document.getElementById("start").addEventListener("click", async () => {
+    document.getElementById("status").textContent = "Статус: получаю session_token…";
     try {
-      const data = await postJSON('/api/token', { role: chosenRole, name });
-      // data.token — токен LiveAvatar (FULL mode)
-      document.getElementById('status').textContent =
-        'Токен получен. Дальше подключаем SDK и стартуем сессию. token=' + (data.token?.slice(0,12) + '…');
+      const tok = await postJSON("/api/token", { language: "ru" });
 
-      // Здесь позже будет реальный "start session" через SDK, где мы получим sessionId
-      // sessionId = ...
+      sessionId = tok.session_id;
+      sessionToken = tok.session_token;
 
-      document.getElementById('stop').disabled = false;
+      document.getElementById("status").textContent = "Токен получен. Стартую сессию…";
+
+      const started = await postJSON("/api/start", { session_token: sessionToken });
+
+      // started.data: livekit_url, livekit_client_token, ws_url, max_session_duration...
+      document.getElementById("status").textContent =
+        "Сессия запущена ✅ session_id=" + (started?.data?.session_id || sessionId);
+
+      document.getElementById("stop").disabled = false;
       startTimer();
     } catch (e) {
-  document.getElementById('status').textContent =
-    'Ошибка получения токена: ' + (e?.message || String(e));
-  console.error(e);
-}
-
+      document.getElementById("status").textContent = "Ошибка: " + (e?.message || String(e));
+      console.error(e);
+    }
   });
 
-  document.getElementById('stop').addEventListener('click', stopSession);
+  document.getElementById("stop").addEventListener("click", stopSession);
 </script>
 </body>
 </html>
