@@ -36,10 +36,14 @@
     </div>
 
     <div class="row" style="margin-top:12px">
-      <button class="primary" id="start">Старт (получить токен)</button>
-      <button class="danger" id="stop" disabled>Завершить</button>
-      <span>Таймер: <code id="timer">—</code></span>
-    </div>
+  <button class="primary" id="start">Старт (получить токен)</button>
+  <button class="danger" id="stop" disabled>Завершить</button>
+
+  <button id="mic" disabled>🎤 Включить микрофон</button>
+
+  <span>Таймер: <code id="timer">—</code></span>
+</div>
+
 
     <p id="status" style="margin-top:12px">Статус: ждём выбора роли.</p>
     <!-- LiveKit / Avatar view + Debug -->
@@ -82,6 +86,7 @@
   let room = null;
   let attachedVideoEl = null;
   let attachedAudioEl = null;
+let localMicTrack = null;
 
   const startDebugEl = document.getElementById("startDebug");
   const lkDebugEl = document.getElementById("lkDebug");
@@ -175,7 +180,9 @@
     });
 
     room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-      try {
+  showLK({ step: "track_subscribed", kind: track.kind, from: participant?.identity || "remote" });
+  try {
+
         if (track.kind === "video") {
           if (videoHint) videoHint.style.display = "none";
 
@@ -231,7 +238,11 @@
 
     await room.connect(lkUrl, lkToken);
 
-    showLK({ step: "connected", room: room.name, sid: room.sid, remotes: room.remoteParticipants.size });
+// включаем кнопку микрофона после коннекта
+document.getElementById("mic").disabled = false;
+
+showLK({ step: "connected", room: room.name, sid: room.sid, remotes: room.remoteParticipants.size });
+
   }
 
   async function stopSession() {
@@ -251,7 +262,9 @@
       document.getElementById("status").textContent = "Статус: ошибка STOP: " + (e?.message || String(e));
       showLK("stop error: " + (e?.message || String(e)));
     }
-    document.getElementById("stop").disabled = true;
+   document.getElementById("stop").disabled = true;
+document.getElementById("mic").disabled = true;
+
   }
 
   document.getElementById("start").addEventListener("click", async () => {
@@ -288,6 +301,40 @@
   });
 
   document.getElementById("stop").addEventListener("click", stopSession);
+
+document.getElementById("mic").addEventListener("click", async () => {
+  try {
+    if (!room) throw new Error("Сначала нажми Start (нужно подключение LiveKit).");
+
+    // если уже включали — выключаем
+    if (localMicTrack) {
+      try { await room.localParticipant.unpublishTrack(localMicTrack); } catch {}
+      try { localMicTrack.stop(); } catch {}
+      localMicTrack = null;
+
+      document.getElementById("mic").textContent = "🎤 Включить микрофон";
+      showLK({ step: "mic_off" });
+      return;
+    }
+
+    showLK("Запрашиваю микрофон… (браузер спросит разрешение)");
+
+    localMicTrack = await window.LivekitClient.createLocalAudioTrack({
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    });
+
+    await room.localParticipant.publishTrack(localMicTrack);
+
+    document.getElementById("mic").textContent = "🔇 Выключить микрофон";
+    showLK({ step: "mic_published" });
+
+  } catch (e) {
+    showLK("mic error: " + (e?.message || String(e)));
+  }
+});
+
 </script>
 
 </body>
