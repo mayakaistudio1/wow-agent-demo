@@ -1,20 +1,26 @@
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed' });
-    return;
+  if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
+
+  try {
+    const { session_id, session_token } = req.body || {};
+    if (!session_id) return res.status(400).json({ error: "Missing session_id" });
+    if (!session_token) return res.status(400).json({ error: "Missing session_token" });
+
+    const r = await fetch("https://api.liveavatar.com/v1/sessions/stop", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "accept": "application/json",
+        "authorization": `Bearer ${session_token}`
+      },
+      body: JSON.stringify({ session_id })
+    });
+
+    const text = await r.text();
+    if (!r.ok) return res.status(r.status).send(text);
+
+    return res.status(200).send(text);
+  } catch (e) {
+    return res.status(500).json({ error: "Stop handler failed", details: String(e?.message || e) });
   }
-
-  // Когда подключим SDK/Start, сюда будет приходить session_id.
-  const { session_id } = req.body || {};
-
-  // Пока не знаем точный endpoint STOP из их docs,
-  // поэтому возвращаем понятный ответ.
-  // Как только ты пришлёшь ссылку/строчку из docs “stop session”,
-  // я вставлю сюда правильный fetch.
-  if (!session_id) {
-    res.status(200).json({ ok: false, note: 'No session_id yet. Connect SDK/start to obtain it.' });
-    return;
-  }
-
-  res.status(200).json({ ok: true, note: 'Stop endpoint not wired yet. Paste LiveAvatar stop endpoint from docs.' });
 }
