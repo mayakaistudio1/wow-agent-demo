@@ -237,6 +237,15 @@ let localMicTrack = null;
     });
 
     await room.connect(lkUrl, lkToken);
+// важно для Chrome: разрешить воспроизведение аудио (внутри клика Start это ок)
+if (typeof room.startAudio === "function") {
+  try {
+    await room.startAudio();
+    showLK({ step: "audio_started_ok" });
+  } catch (e) {
+    showLK("audio_started_blocked: " + (e?.message || String(e)));
+  }
+}
 
 // включаем кнопку микрофона после коннекта
 document.getElementById("mic").disabled = false;
