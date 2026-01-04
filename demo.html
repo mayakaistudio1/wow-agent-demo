@@ -112,11 +112,14 @@ let localMicTrack = null;
   }
 
   function showLK(msgOrObj) {
-    if (!lkDebugEl) return;
-    lkDebugEl.textContent = (typeof msgOrObj === "string")
-      ? msgOrObj
-      : JSON.stringify(msgOrObj, null, 2);
-  }
+  if (!lkDebugEl) return;
+  const line = (typeof msgOrObj === "string")
+    ? msgOrObj
+    : JSON.stringify(msgOrObj, null, 0);
+
+  lkDebugEl.textContent += line + "\n";
+  lkDebugEl.scrollTop = lkDebugEl.scrollHeight;
+}
 
   function cleanupMedia() {
     if (attachedVideoEl) {
@@ -206,25 +209,37 @@ let localMicTrack = null;
         }
 
         if (track.kind === "audio") {
-          if (attachedAudioEl) {
-            attachedAudioEl.srcObject = null;
-            attachedAudioEl.remove();
-            attachedAudioEl = null;
-          }
+  // убираем старый audio element
+  if (attachedAudioEl) {
+    try { attachedAudioEl.pause?.(); } catch {}
+    attachedAudioEl.srcObject = null;
+    attachedAudioEl.remove();
+    attachedAudioEl = null;
+  }
 
-          const ael = track.attach();
-          ael.autoplay = true;
-          ael.muted = false;
-          ael.style.display = "none";
-          document.body.appendChild(ael);
-          attachedAudioEl = ael;
+  const ael = track.attach();
+  ael.autoplay = true;
+  ael.muted = false;
+  ael.volume = 1;
+  ael.playsInline = true;
 
-          ael.play?.().catch(() => {
-            showLK("audio autoplay blocked — если нет звука, добавим кнопку Unmute.");
-          });
+  // ВАЖНО: для отладки покажем controls (потом вернёшь display:none)
+  ael.controls = true;
+  ael.style.display = "block";
+  ael.style.width = "320px";
 
-          showLK({ step: "audio_attached", from: participant?.identity || "remote" });
-        }
+  document.body.appendChild(ael);
+  attachedAudioEl = ael;
+
+  // форсим play и логируем результат
+  Promise.resolve()
+    .then(() => ael.play())
+    .then(() => showLK({ step: "audio_play_ok" }))
+    .catch((err) => showLK("audio_play_failed: " + (err?.message || String(err))));
+
+  showLK({ step: "audio_attached", from: participant?.identity || "remote" });
+}
+
       } catch (e) {
         showLK("trackSubscribed error: " + (e?.message || String(e)));
       }
@@ -278,7 +293,7 @@ document.getElementById("mic").disabled = true;
 
   document.getElementById("start").addEventListener("click", async () => {
     document.getElementById("status").textContent = "Статус: получаю session_token…";
-    showLK("");
+lkDebugEl.textContent = "";
     showStartJSON(null);
 
     try {
