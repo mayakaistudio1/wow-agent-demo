@@ -15,7 +15,7 @@ export default async function handler(req, res) {
     const { language = "ru" } = req.body || {};
 
     const payload = {
-      mode: "CUSTOM",
+      mode: "FULL",
       avatar_id: AVATAR_ID,
       avatar_persona: {
         voice_id: VOICE_ID,
