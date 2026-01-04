@@ -183,7 +183,11 @@ let localMicTrack = null;
     });
 
     room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-  showLK({ step: "track_subscribed", kind: track.kind, from: participant?.identity || "remote" });
+  const who = participant?.identity || "remote";
+  showLK({ step: "track_subscribed", kind: track.kind, from: who });
+
+  if (who !== "heygen") return;
+
   try {
 
         if (track.kind === "video") {
