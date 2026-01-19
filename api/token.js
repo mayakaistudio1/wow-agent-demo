@@ -10,7 +10,7 @@ export default async function handler(req, res) {
     // твои значения
     const AVATAR_ID = "9650a758-1085-4d49-8bf3-f347565ec229";
     const VOICE_ID  = "c23719ef-d070-42ee-9cd9-4b867c621671";
-    const CONTEXT_ID= "0af664ad-8b66-4f6e-91ab-3b3245d4d72d";
+    const CONTEXT_ID= "8cea302e-4693-47ec-b960-7cb8c8c666a7";
 
     const { language = "ru" } = req.body || {};
 
